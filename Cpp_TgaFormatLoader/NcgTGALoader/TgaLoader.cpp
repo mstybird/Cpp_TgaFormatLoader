@@ -60,5 +60,60 @@ namespace Comfort {
 		return true;
 	}
 
+	bool TGAImage::CreateTextureResource2D(ID3D11Device* aDevice,ID3D11ShaderResourceView *& aOutTexture)
+	{
+		D3D11_TEXTURE2D_DESC lDesc;
+		lDesc.Width = mWidth;
+		lDesc.Height = mHeight;
+		lDesc.MipLevels = 1;
+		lDesc.ArraySize = 1;
+		
+		switch (mFormat)
+		{
+		case Comfort::TGAFormat::RGB://フォールスルー
+		case Comfort::TGAFormat::RGBA:
+			lDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			break;
+		default:
+			break;
+		}
+
+		lDesc.SampleDesc.Count = 1;
+		lDesc.SampleDesc.Quality = 0;
+		lDesc.Usage = D3D11_USAGE_DEFAULT;
+		lDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		lDesc.CPUAccessFlags = 0;
+		lDesc.MiscFlags = 0;
+
+		D3D11_SUBRESOURCE_DATA lInitData;
+		lInitData.pSysMem = mImageData.data();
+		lInitData.SysMemPitch = mWidth*(mBpp / 8);
+		lInitData.SysMemSlicePitch = mWidth*mHeight*(mBpp / 8);
+		ID3D11Texture2D* lTempTexture;
+		auto lHr = aDevice->CreateTexture2D(&lDesc, &lInitData, &lTempTexture);
+		if (FAILED(lHr)) {
+			if (lTempTexture) {
+				lTempTexture->Release();
+			}
+			return false;
+		}
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC lSRVDesc{};
+		lSRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		lSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		lSRVDesc.Texture2D.MipLevels = 1;
+		lHr = aDevice->CreateShaderResourceView(lTempTexture, &lSRVDesc, &aOutTexture);
+		if (FAILED(lHr)) {
+			if (lTempTexture) {
+				lTempTexture->Release();
+			}
+			return false;
+		}
+		if (lTempTexture) {
+			lTempTexture->Release();
+		}
+		return true;
+	}
+
 }
 

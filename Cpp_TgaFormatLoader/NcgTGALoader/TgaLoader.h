@@ -1,5 +1,6 @@
 #pragma once
 #include<vector>
+#include <d3dx11.h>
 
 namespace Comfort {
 
@@ -13,6 +14,7 @@ namespace Comfort {
 		TGAImage() {};
 		~TGAImage() {}
 		bool ReadTGA(const char*mFileName);
+		bool CreateTextureResource2D(ID3D11Device* aDevice, ID3D11ShaderResourceView *& aOutTexture);
 	protected:
 		int32_t mImageSize;
 		std::vector<int8_t> mImageData;

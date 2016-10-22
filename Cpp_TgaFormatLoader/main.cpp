@@ -1,515 +1,406 @@
-/*----------------------------------------------------------
-Direct3D 11サンプル
-・Microsoft DirectX SDK (February 2010)
-・Visual Studio 2010 Express
-・Windows 7/Vista
-・シェーダモデル4.0
-対応
-
-D3D11Sample01.cpp
-「基本的なアプリケーション」
---------------------------------------------------------------*/
-
-
-#include"main.h"
-
-
-
-
-/*-------------------------------------------
-グローバル変数(アプリケーション関連)
---------------------------------------------*/
-HINSTANCE	g_hInstance = NULL;	// インスタンス ハンドル
-HWND		g_hWindow = NULL;	// ウインドウ ハンドル
-
-WCHAR		g_szAppTitle[] = L"Direct3D 11 Sample01";
-WCHAR		g_szWndClass[] = L"D3D11S01";
-
-// 起動時の描画領域サイズ
-SIZE		g_sizeWindow = { 640, 480 };		// ウインドウのクライアント領域
-
-												/*-------------------------------------------
-												グローバル変数(Direct3D関連)
-												--------------------------------------------*/
-
-												//機能レベルの配列
-D3D_FEATURE_LEVEL g_pFeatureLevels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0 };
-UINT              g_FeatureLevels = 3;   // 配列の要素数
-D3D_FEATURE_LEVEL g_FeatureLevelsSupported; // デバイス作成時に返される機能レベル
-
-											// インターフェイス
-IDXGIFactory*			g_pFactory = NULL;			//DXGI
-ID3D11Device*           g_pD3DDevice = NULL;        // デバイス
-ID3D11DeviceContext*    g_pImmediateContext = NULL; // デバイス・コンテキスト
-IDXGISwapChain*         g_pSwapChain = NULL;        // スワップ・チェイン
-
-ID3D11RenderTargetView* g_pRenderTargetView = NULL; // 描画ターゲット・ビュー
-D3D11_VIEWPORT          g_ViewPort[1];				// ビューポート
-
-ID3D11Texture2D*         g_pDepthStencil;           // 深度/ステンシル・テクスチャ
-ID3D11DepthStencilView*  g_pDepthStencilView;       // 深度/ステンシル・ビュー
-
-bool g_bStandbyMode = false;
-float ClearColor[4] = { 0.0f, 0.125f, 0.3f, 1.0f }; // クリアする値(RGBA)
-
-
-
-/*-------------------------------------------
-アプリケーション初期化
---------------------------------------------*/
-HRESULT InitApp(HINSTANCE hInst)
+#include "MAIN.h"
+#include"NcgTGALoader\TgaLoader.h"
+//グローバル変数
+MAIN* g_pMain=NULL;
+//関数プロトタイプの宣言
+LRESULT CALLBACK WndProc(HWND hWnd,UINT uMsg,WPARAM wParam,LPARAM lParam);
+//
+//
+//アプリケーションのエントリー関数 
+INT WINAPI WinMain(HINSTANCE hInstance,HINSTANCE,LPSTR,INT)
 {
-	// アプリケーションのインスタンス ハンドルを保存
-	g_hInstance = hInst;
-
-	// ウインドウ クラスの登録
-	WNDCLASS wc;
-	wc.style = CS_HREDRAW | CS_VREDRAW;
-	wc.lpfnWndProc = (WNDPROC)MainWndProc;
-	wc.cbClsExtra = 0;
-	wc.cbWndExtra = 0;
-	wc.hInstance = hInst;
-	wc.hIcon = LoadIcon(hInst, IDI_ASTERISK);
-	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-	wc.lpszMenuName = NULL;
-	wc.lpszClassName = g_szWndClass;
-
-	if (!RegisterClass(&wc))
-		return E_FAIL;
-
-	// メイン ウインドウ作成
-	RECT rect;
-	rect.top = 0;
-	rect.left = 0;
-	rect.right = g_sizeWindow.cx;
-	rect.bottom = g_sizeWindow.cy;
-	AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, TRUE);
-
-	g_hWindow = CreateWindow(g_szWndClass, g_szAppTitle,
-		WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT, CW_USEDEFAULT,
-		rect.right - rect.left, rect.bottom - rect.top,
-		NULL, NULL, hInst, NULL);
-	if (g_hWindow == NULL)
-		return E_FAIL;
-
-	// ウインドウ表示
-	ShowWindow(g_hWindow, SW_SHOWNORMAL);
-	UpdateWindow(g_hWindow);
-
-	return S_OK;
-}
-
-/*-------------------------------------------
-Direct3D初期化
---------------------------------------------*/
-HRESULT InitDirect3D(void)
-{
-	// ウインドウのクライアント エリア
-	RECT rc;
-	GetClientRect(g_hWindow, &rc);
-	UINT width = rc.right - rc.left;
-	UINT height = rc.bottom - rc.top;
-
-	// デバイスとスワップ・チェインの作成
-	DXGI_SWAP_CHAIN_DESC sd;
-	ZeroMemory(&sd, sizeof(sd));    // 構造体の値を初期化(必要な場合)
-	sd.BufferCount = 1;       // バック・バッファ数
-	sd.BufferDesc.Width = 640;     // バック・バッファの幅
-	sd.BufferDesc.Height = 480;     // バック・バッファの高さ
-	sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // フォーマット
-	sd.BufferDesc.RefreshRate.Numerator = 60;  // リフレッシュ・レート(分子)
-	sd.BufferDesc.RefreshRate.Denominator = 1; // リフレッシュ・レート(分母)
-	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; // バック・バッファの使用法
-	sd.OutputWindow = g_hWindow;    // 関連付けるウインドウ
-	sd.SampleDesc.Count = 1;        // マルチ・サンプルの数
-	sd.SampleDesc.Quality = 0;      // マルチ・サンプルのクオリティ
-	sd.Windowed = TRUE;             // ウインドウ・モード
-	sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH; // モード自動切り替え
-
-#if defined(DEBUG) || defined(_DEBUG)
-													   //UINT createDeviceFlags = D3D11_CREATE_DEVICE_DEBUG;
-	UINT createDeviceFlags = 0;
-
-#else
-	UINT createDeviceFlags = 0;
-#endif
-
-	// ハードウェア・デバイスを作成
-	HRESULT hr = D3D11CreateDeviceAndSwapChain(
-		NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, createDeviceFlags,
-		g_pFeatureLevels, g_FeatureLevels, D3D11_SDK_VERSION, &sd,
-		&g_pSwapChain, &g_pD3DDevice, &g_FeatureLevelsSupported,
-		&g_pImmediateContext);
-	if (FAILED(hr)) {
-		// WARPデバイスを作成
-		hr = D3D11CreateDeviceAndSwapChain(
-			NULL, D3D_DRIVER_TYPE_WARP, NULL, createDeviceFlags,
-			g_pFeatureLevels, g_FeatureLevels, D3D11_SDK_VERSION, &sd,
-			&g_pSwapChain, &g_pD3DDevice, &g_FeatureLevelsSupported,
-			&g_pImmediateContext);
-		if (FAILED(hr)) {
-			// リファレンス・デバイスを作成
-			hr = D3D11CreateDeviceAndSwapChain(
-				NULL, D3D_DRIVER_TYPE_REFERENCE, NULL, createDeviceFlags,
-				g_pFeatureLevels, g_FeatureLevels, D3D11_SDK_VERSION, &sd,
-				&g_pSwapChain, &g_pD3DDevice, &g_FeatureLevelsSupported,
-				&g_pImmediateContext);
-			if (FAILED(hr)) {
-				return E_FAIL;
-			}
-		}
-	}
-
-	// バック バッファの初期化
-	hr = InitBackBuffer();
-	if (FAILED(hr))
-		return E_FAIL;
-
-
-	//IDXGIFactoryインターフェースの取得
-	hr = CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)(&g_pFactory));
-	if (FAILED(hr)) {
-		return E_FAIL;
-	}
-
-	//Alt+Enterによる画面切り替えを有効化する
-	hr = g_pFactory->MakeWindowAssociation(g_hWindow, 0);
-
-	if (FAILED(hr)) {
-		return E_FAIL;
-	}
-
-
-	return S_OK;
-}
-
-void InitResource()
-{
-	Comfort::TGAImage tga;
-	tga.ReadTGA("Resource/Building_Texture.tga");
-}
-
-/*-------------------------------------------
-バック バッファの初期化(バック バッファを描画ターゲットに設定)
---------------------------------------------*/
-HRESULT InitBackBuffer(void)
-{
-	HRESULT hr;
-
-	// スワップ・チェインから最初のバック・バッファを取得する
-	ID3D11Texture2D *pBackBuffer;  // バッファのアクセスに使うインターフェイス
-	hr = g_pSwapChain->GetBuffer(
-		0,                         // バック・バッファの番号
-		__uuidof(ID3D11Texture2D), // バッファにアクセスするインターフェイス
-		(LPVOID*)&pBackBuffer);    // バッファを受け取る変数
-	if (FAILED(hr))
-		return E_FAIL;
-
-	// バック・バッファの情報
-	D3D11_TEXTURE2D_DESC descBackBuffer;
-	pBackBuffer->GetDesc(&descBackBuffer);
-
-	// バック・バッファの描画ターゲット・ビューを作る
-	hr = g_pD3DDevice->CreateRenderTargetView(
-		pBackBuffer,           // ビューでアクセスするリソース
-		NULL,                  // 描画ターゲット・ビューの定義
-		&g_pRenderTargetView); // 描画ターゲット・ビューを受け取る変数
-	SAFE_RELEASE(pBackBuffer);  // 以降、バック・バッファは直接使わないので解放
-	if (FAILED(hr))
-		return E_FAIL;
-
-	// 深度/ステンシル・テクスチャの作成
-	D3D11_TEXTURE2D_DESC descDepth = descBackBuffer;
-	//	descDepth.Width     = descBackBuffer.Width;   // 幅
-	//	descDepth.Height    = descBackBuffer.Height;  // 高さ
-	descDepth.MipLevels = 1;       // ミップマップ・レベル数
-	descDepth.ArraySize = 1;       // 配列サイズ
-	descDepth.Format = DXGI_FORMAT_D32_FLOAT;  // フォーマット(深度のみ)
-											   //	descDepth.SampleDesc.Count   = 1;  // マルチサンプリングの設定
-											   //	descDepth.SampleDesc.Quality = 0;  // マルチサンプリングの品質
-	descDepth.Usage = D3D11_USAGE_DEFAULT;      // デフォルト使用法
-	descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL; // 深度/ステンシルとして使用
-	descDepth.CPUAccessFlags = 0;   // CPUからはアクセスしない
-	descDepth.MiscFlags = 0;   // その他の設定なし
-	hr = g_pD3DDevice->CreateTexture2D(
-		&descDepth,         // 作成する2Dテクスチャの設定
-		NULL,               // 
-		&g_pDepthStencil);  // 作成したテクスチャを受け取る変数
-	if (FAILED(hr))
-		return E_FAIL;
-
-	// 深度/ステンシル・ビューの作成
-	D3D11_DEPTH_STENCIL_VIEW_DESC descDSV;
-	descDSV.Format = descDepth.Format;            // ビューのフォーマット
-	descDSV.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-	descDSV.Flags = 0;
-	descDSV.Texture2D.MipSlice = 0;
-	hr = g_pD3DDevice->CreateDepthStencilView(
-		g_pDepthStencil,       // 深度/ステンシル・ビューを作るテクスチャ
-		&descDSV,              // 深度/ステンシル・ビューの設定
-		&g_pDepthStencilView); // 作成したビューを受け取る変数
-	if (FAILED(hr))
-		return E_FAIL;
-
-	// ビューポートの設定
-	g_ViewPort[0].TopLeftX = 0.0f;    // ビューポート領域の左上X座標。
-	g_ViewPort[0].TopLeftY = 0.0f;    // ビューポート領域の左上Y座標。
-	g_ViewPort[0].Width = 640.0f;  // ビューポート領域の幅
-	g_ViewPort[0].Height = 480.0f;  // ビューポート領域の高さ
-	g_ViewPort[0].MinDepth = 0.0f; // ビューポート領域の深度値の最小値
-	g_ViewPort[0].MaxDepth = 1.0f; // ビューポート領域の深度値の最大値
-
-	return S_OK;
-}
-
-/*--------------------------------------------
-画面の描画処理
---------------------------------------------*/
-HRESULT Render(void)
-{
-	HRESULT hr;
-
-	// 描画ターゲットのクリア
-	g_pImmediateContext->ClearRenderTargetView(
-		g_pRenderTargetView, // クリアする描画ターゲット
-		ClearColor);         // クリアする値
-
-							 // 深度/ステンシル値のクリア
-	g_pImmediateContext->ClearDepthStencilView(
-		g_pDepthStencilView, // クリアする深度/ステンシル・ビュー
-		D3D11_CLEAR_DEPTH,   // 深度値だけをクリアする
-		1.0f,         // 深度バッファをクリアする値
-		0);           // ステンシル・バッファをクリアする値(この場合、無関係)
-
-					  // ラスタライザにビューポートを設定
-	g_pImmediateContext->RSSetViewports(1, g_ViewPort);
-
-	// 描画ターゲット・ビューを出力マージャーの描画ターゲットとして設定
-	g_pImmediateContext->OMSetRenderTargets(
-		1,                    // 描画ターゲットの数
-		&g_pRenderTargetView, // 描画ターゲット・ビューの配列
-		g_pDepthStencilView); // 設定する深度/ステンシル・ビュー
-
-							  // 描画(省略)
-
-							  // バック・バッファの表示
-	hr = g_pSwapChain->Present(0,   // 画面を直ぐに更新する
-		0);  // 画面を実際に更新する
-
-	return hr;
-}
-
-/*-------------------------------------------
-Direct3Dの終了処理
---------------------------------------------*/
-bool CleanupDirect3D(void)
-{
-	// デバイス・ステートのクリア
-	if (g_pImmediateContext)
-		g_pImmediateContext->ClearState();
-
-	//フルスクリーンの場合、一度ウィンドウモードにする
-	if (g_pSwapChain) {
-		g_pSwapChain->SetFullscreenState(FALSE, NULL);
-	}
-
-	// 取得したインターフェイスの開放
-	SAFE_RELEASE(g_pDepthStencilView);
-	SAFE_RELEASE(g_pDepthStencil);
-
-	SAFE_RELEASE(g_pRenderTargetView);
-	SAFE_RELEASE(g_pSwapChain);
-
-	SAFE_RELEASE(g_pImmediateContext);
-	SAFE_RELEASE(g_pD3DDevice);
-
-	return true;
-}
-
-/*-------------------------------------------
-アプリケーションの終了処理
---------------------------------------------*/
-bool CleanupApp(void)
-{
-	// ウインドウ クラスの登録解除
-	UnregisterClass(g_szWndClass, g_hInstance);
-	return true;
-}
-
-/*-------------------------------------------
-ウィンドウ処理
---------------------------------------------*/
-LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, UINT wParam, LONG lParam)
-{
-	HRESULT hr = S_OK;
-
-	switch (msg)
+	g_pMain=new MAIN;
+	if(g_pMain != NULL)
 	{
-	case WM_DESTROY:
-		// Direct3Dの終了処理
-		CleanupDirect3D();
-		// ウインドウを閉じる
-		PostQuitMessage(0);
-		g_hWindow = NULL;
-		return 0;
-		break;
-	case WM_KEYDOWN:
-		// キー入力の処理
-		switch (wParam)
+		if(SUCCEEDED(g_pMain->InitWindow(hInstance,0,0,WINDOW_WIDTH,
+			WINDOW_HEIGHT,APP_NAME)))
 		{
-		case VK_ESCAPE:	// [ESC]キーでウインドウを閉じる
-			PostMessage(hWnd, WM_CLOSE, 0, 0);
-			break;
-		case VK_F5:
-			if (g_pSwapChain != NULL) {
-				BOOL fullscreen;
-				g_pSwapChain->GetFullscreenState(&fullscreen, 0);
-				g_pSwapChain->SetFullscreenState(!fullscreen, 0);
+			if(SUCCEEDED(g_pMain->InitD3D()))
+			{
+				g_pMain->Loop();
 			}
-			break;
-		case VK_F6:
-			//ディスプレイモードの変更
-			DXGI_MODE_DESC desc;
-			desc.Width = 800;
-			desc.Height = 600;
-			desc.RefreshRate.Numerator = 60;
-			desc.RefreshRate.Denominator = 1;
-			desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-			desc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
-			desc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
-			hr = g_pSwapChain->ResizeTarget(&desc);
-			if (FAILED(hr)) {
-				return E_FAIL;
-			}
+		}
+		//アプリ終了
+		g_pMain->DestroyD3D();
+		delete g_pMain;
+	}
+	return 0;
+}
+//
+//
+//OSから見たウィンドウプロシージャー（実際の処理はMAINクラスのプロシージャーで処理）
+LRESULT CALLBACK WndProc(HWND hWnd,UINT uMsg,WPARAM wParam,LPARAM lParam)
+{
+	return g_pMain->MsgProc(hWnd,uMsg,wParam,lParam);
+}
+//
+//
+//
+MAIN::MAIN()
+{
+	ZeroMemory(this,sizeof(MAIN));
+}
+//
+//
+//
+MAIN::~MAIN()
+{
+}
+//
+//
+//ウィンドウ作成
+HRESULT MAIN::InitWindow(HINSTANCE hInstance,
+		INT iX,INT iY,INT iWidth,INT iHeight,LPCWSTR WindowName)
+{
+	// ウィンドウの定義
+	WNDCLASSEX  wc;
+	ZeroMemory(&wc,sizeof(wc));
+	wc.cbSize = sizeof(wc);
+	wc.style = CS_HREDRAW | CS_VREDRAW;
+	wc.lpfnWndProc = WndProc;
+	wc.hInstance = hInstance;
+	wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+	wc.hbrBackground = (HBRUSH)GetStockObject(LTGRAY_BRUSH);
+	wc.lpszClassName = WindowName;
+	wc.hIconSm = LoadIcon(NULL,IDI_APPLICATION);
+	RegisterClassEx(&wc);
+	//ウィンドウの作成
+	m_hWnd=CreateWindow(WindowName,WindowName,WS_OVERLAPPEDWINDOW,
+	 0,0,iWidth,iHeight,0,0,hInstance,0);
+	if(!m_hWnd)
+	{
+	 return E_FAIL;
+	}
+	//ウインドウの表示
+	ShowWindow(m_hWnd,SW_SHOW);
+	UpdateWindow(m_hWnd) ;
+
+	return S_OK;
+}
+//
+//
+//ウィンドウプロシージャー
+LRESULT MAIN::MsgProc(HWND hWnd,UINT iMsg,WPARAM wParam,LPARAM lParam)
+{
+	switch(iMsg)
+	{
+		case WM_KEYDOWN:
+		switch((char)wParam)
+		{
+			case VK_ESCAPE://ESCキーで修了
+			PostQuitMessage(0);
 			break;
 		}
 		break;
-	}
-
-	// デフォルト処理
-	return DefWindowProc(hWnd, msg, wParam, lParam);
-}
-
-/*--------------------------------------------
-デバイスの消失処理
---------------------------------------------*/
-HRESULT IsDeviceRemoved(void)
-{
-	HRESULT hr;
-
-	// デバイスの消失確認
-	hr = g_pD3DDevice->GetDeviceRemovedReason();
-	switch (hr) {
-	case S_OK:
-		break;         // 正常
-
-	case DXGI_ERROR_DEVICE_HUNG:
-	case DXGI_ERROR_DEVICE_RESET:
-		CleanupDirect3D();   // Direct3Dの解放(アプリケーション定義)
-		hr = InitDirect3D();  // Direct3Dの初期化(アプリケーション定義)
-		if (FAILED(hr))
-			return E_FAIL;
+		case WM_DESTROY:
+		PostQuitMessage(0);
 		break;
-
-	case DXGI_ERROR_DEVICE_REMOVED:
-	case DXGI_ERROR_DRIVER_INTERNAL_ERROR:
-	case DXGI_ERROR_INVALID_CALL:
-	default:
-		return E_FAIL;
-	};
-
-	return S_OK;         // 正常
+	}
+	return DefWindowProc (hWnd, iMsg, wParam, lParam);
 }
-
-/*--------------------------------------------
-アイドル時の処理
---------------------------------------------*/
-bool AppIdle(void)
+//
+//
+//メッセージループとアプリケーション処理の入り口
+void MAIN::Loop()
 {
-	if (!g_pD3DDevice)
-		return false;
-
-	HRESULT hr;
-	// デバイスの消失処理
-	hr = IsDeviceRemoved();
-	if (FAILED(hr))
-		return false;
-
-	//スタンバイモード
-	if (g_bStandbyMode) {
-		hr = g_pSwapChain->Present(0, DXGI_PRESENT_TEST);
-		if (hr == DXGI_STATUS_OCCLUDED) {
-			//描画不要状態
-			return true;
-		}
-		else {
-			//スタンバイから復帰した場合
-			g_bStandbyMode = false;
-		}
-	}
-
-	hr = Render();
-
-	if (hr == DXGI_STATUS_OCCLUDED) {
-		g_bStandbyMode = true;
-		//描画ターゲットカラー変更
-		float a = ClearColor[0];
-		int i;
-		for (i = 0; i < 3; i++) {
-			ClearColor[i] = ClearColor[i + 1];
-		}
-		ClearColor[i] = a;
-	}
-
-
-	return true;
-}
-
-/*--------------------------------------------
-メイン
----------------------------------------------*/
-int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
-{
-	// デバッグ ヒープ マネージャによるメモリ割り当ての追跡方法を設定
-	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
-
-	// アプリケーションに関する初期化
-	HRESULT hr = InitApp(hInst);
-	if (FAILED(hr))
+	// メッセージループ
+	MSG msg={0};
+	ZeroMemory(&msg,sizeof(msg));
+	while(msg.message!=WM_QUIT)
 	{
-		return -1;
-	}
-
-	// Direct3Dの初期化
-	hr = InitDirect3D();
-	if (FAILED(hr)) {
-		CleanupDirect3D();
-		CleanupApp();
-		return -2;
-	}
-	InitResource();
-	// メッセージ ループ
-	MSG msg;
-	do
-	{
-		if (PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
+		if( PeekMessage(&msg,NULL,0,0,PM_REMOVE))
 		{
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
 		else
 		{
-			// アイドル処理
-			if (!AppIdle())
-				// エラーがある場合，アプリケーションを終了する
-				DestroyWindow(g_hWindow);
+			//アプリケーションの処理はここから飛ぶ。
+			App();
 		}
-	} while (msg.message != WM_QUIT);
+	}
+}
+//
+//
+//アプリケーション処理。アプリのメイン関数。
+void MAIN::App()
+{
+	Render();
+}
+//
+//
+//
+HRESULT MAIN::InitD3D()
+{
+	// デバイスとスワップチェーンの作成
+	DXGI_SWAP_CHAIN_DESC sd;
+	ZeroMemory( &sd, sizeof(sd) );
+	sd.BufferCount = 1;
+	sd.BufferDesc.Width=WINDOW_WIDTH;
+	sd.BufferDesc.Height=WINDOW_HEIGHT;
+	sd.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+	sd.BufferDesc.RefreshRate.Numerator=60;
+	sd.BufferDesc.RefreshRate.Denominator=1;
+	sd.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	sd.OutputWindow=m_hWnd;
+	sd.SampleDesc.Count=1;
+	sd.SampleDesc.Quality=0;
+	sd.Windowed=TRUE;
+	
+	D3D_FEATURE_LEVEL pFeatureLevels = D3D_FEATURE_LEVEL_11_0;
+	D3D_FEATURE_LEVEL* pFeatureLevel = NULL;
+	
+	if( FAILED( D3D11CreateDeviceAndSwapChain(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,
+		0,&pFeatureLevels,1,D3D11_SDK_VERSION,&sd,&m_pSwapChain,&m_pDevice,
+		pFeatureLevel,&m_pDeviceContext )) )
+	{
+		return FALSE;
+	}
+	//各種テクスチャーと、それに付帯する各種ビューを作成
 
-	// アプリケーションの終了処理
-	CleanupApp();
+	//バックバッファーテクスチャーを取得（既にあるので作成ではない）
+	ID3D11Texture2D *pBackBuffer_Tex;
+	m_pSwapChain->GetBuffer( 0, __uuidof( ID3D11Texture2D ),(LPVOID*)&pBackBuffer_Tex);
+	//そのテクスチャーに対しレンダーターゲットビュー(RTV)を作成
+	m_pDevice->CreateRenderTargetView( pBackBuffer_Tex, NULL, &m_pBackBuffer_TexRTV );
+	SAFE_RELEASE(pBackBuffer_Tex);	
 
-	return (int)msg.wParam;
+	//デプスステンシルビュー用のテクスチャーを作成
+	D3D11_TEXTURE2D_DESC descDepth;
+	descDepth.Width = WINDOW_WIDTH;
+	descDepth.Height = WINDOW_HEIGHT;
+	descDepth.MipLevels = 1;
+	descDepth.ArraySize = 1;
+	descDepth.Format = DXGI_FORMAT_D32_FLOAT;
+	descDepth.SampleDesc.Count = 1;
+	descDepth.SampleDesc.Quality = 0;
+	descDepth.Usage = D3D11_USAGE_DEFAULT;
+	descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	descDepth.CPUAccessFlags = 0;
+	descDepth.MiscFlags = 0;
+	m_pDevice->CreateTexture2D( &descDepth, NULL, &m_pBackBuffer_DSTex );
+	//そのテクスチャーに対しデプスステンシルビュー(DSV)を作成
+	m_pDevice->CreateDepthStencilView( m_pBackBuffer_DSTex, NULL, &m_pBackBuffer_DSTexDSV);
+
+	//レンダーターゲットビューと深度ステンシルビューをパイプラインにバインド
+	m_pDeviceContext->OMSetRenderTargets(1, &m_pBackBuffer_TexRTV,m_pBackBuffer_DSTexDSV);
+	//ビューポートの設定
+	D3D11_VIEWPORT vp;
+	vp.Width = WINDOW_WIDTH;
+	vp.Height = WINDOW_HEIGHT;
+	vp.MinDepth = 0.0f;
+	vp.MaxDepth = 1.0f;
+	vp.TopLeftX = 0;
+	vp.TopLeftY = 0;
+	m_pDeviceContext->RSSetViewports( 1, &vp );
+	//ラスタライズ設定
+	D3D11_RASTERIZER_DESC rdc;
+	ZeroMemory(&rdc,sizeof(rdc));
+	rdc.CullMode=D3D11_CULL_NONE;
+	rdc.FillMode=D3D11_FILL_SOLID;
+	ID3D11RasterizerState* pIr=NULL;
+	//m_pDevice->CreateRasterizerState(&rdc,&pIr);
+	//m_pDeviceContext->RSSetState(pIr);
+	SAFE_RELEASE(pIr);
+	//シェーダー初期化
+	if(FAILED(InitShader()))
+	{
+		return E_FAIL;
+	}
+	//ポリゴン作成
+	if(FAILED(InitPolygon()))
+	{
+		return E_FAIL;
+	}
+
+	return S_OK;
+}
+//
+//
+//
+void MAIN::DestroyD3D()
+{
+	SAFE_RELEASE(m_pConstantBuffer);
+	SAFE_RELEASE(m_pVertexShader);
+	SAFE_RELEASE(m_pPixelShader);
+	SAFE_RELEASE(m_pVertexBuffer);
+	SAFE_RELEASE(m_pVertexLayout);
+	SAFE_RELEASE(m_pSwapChain);
+	SAFE_RELEASE(m_pBackBuffer_TexRTV);
+	SAFE_RELEASE(m_pBackBuffer_DSTexDSV);
+	SAFE_RELEASE(m_pBackBuffer_DSTex);
+	SAFE_RELEASE(m_pDeviceContext);
+	SAFE_RELEASE(m_pDevice);
+	SAFE_RELEASE(m_pSampleLinear);
+	SAFE_RELEASE(m_pTexture);
+}
+//
+//
+//シェーダーを作成　頂点レイアウトを定義
+HRESULT MAIN::InitShader()
+{
+	//hlslファイル読み込み ブロブ作成　ブロブとはシェーダーの塊みたいなもの。XXシェーダーとして特徴を持たない。後で各種シェーダーに成り得る。
+	ID3DBlob *pCompiledShader=NULL;
+	ID3DBlob *pErrors=NULL;
+	//ブロブからバーテックスシェーダー作成
+	if(FAILED(D3DX11CompileFromFile(L"SimpleTexture.hlsl",NULL,NULL,"VS","vs_5_0",0,0,NULL,&pCompiledShader,&pErrors,NULL)))
+	{
+		MessageBox(0,L"hlsl読み込み失敗",NULL,MB_OK);
+		return E_FAIL;
+	}
+	SAFE_RELEASE(pErrors);
+
+	if(FAILED(m_pDevice->CreateVertexShader(pCompiledShader->GetBufferPointer(),pCompiledShader->GetBufferSize(),NULL,&m_pVertexShader)))
+	{
+		SAFE_RELEASE(pCompiledShader);
+		MessageBox(0,L"バーテックスシェーダー作成失敗",NULL,MB_OK);
+		return E_FAIL;
+	}
+	//頂点インプットレイアウトを定義	
+	D3D11_INPUT_ELEMENT_DESC layout[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }, 
+	};
+	UINT numElements = sizeof(layout)/sizeof(layout[0]);
+	//頂点インプットレイアウトを作成
+	if( FAILED( m_pDevice->CreateInputLayout( layout, numElements, pCompiledShader->GetBufferPointer(), pCompiledShader->GetBufferSize(), &m_pVertexLayout ) ) )
+	{
+		return FALSE;
+	}
+	//ブロブからピクセルシェーダー作成
+	if(FAILED(D3DX11CompileFromFile(L"SimpleTexture.hlsl",NULL,NULL,"PS","ps_5_0",0,0,NULL,&pCompiledShader,&pErrors,NULL)))
+	{
+		MessageBox(0,L"hlsl読み込み失敗",NULL,MB_OK);
+		return E_FAIL;
+	}
+	SAFE_RELEASE(pErrors);
+	if(FAILED(m_pDevice->CreatePixelShader(pCompiledShader->GetBufferPointer(),pCompiledShader->GetBufferSize(),NULL,&m_pPixelShader)))
+	{
+		SAFE_RELEASE(pCompiledShader);
+		MessageBox(0,L"ピクセルシェーダー作成失敗",NULL,MB_OK);
+		return E_FAIL;
+	}
+	SAFE_RELEASE(pCompiledShader);		
+	//コンスタントバッファー作成　ここでは変換行列渡し用
+	D3D11_BUFFER_DESC cb;
+	cb.BindFlags= D3D11_BIND_CONSTANT_BUFFER;
+	cb.ByteWidth= sizeof(SIMPLESHADER_CONSTANT_BUFFER);
+	cb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+	cb.MiscFlags	=0;
+	cb.StructureByteStride=0;
+	cb.Usage=D3D11_USAGE_DYNAMIC;
+
+	if( FAILED(m_pDevice->CreateBuffer( &cb,NULL,&m_pConstantBuffer)))
+	{
+		return E_FAIL;
+	}
+	return S_OK;
+}
+//
+//
+//
+HRESULT MAIN::InitPolygon()
+{
+	//バーテックスバッファー作成
+	SimpleVertex vertices[]=
+	{
+		D3DXVECTOR3( -0.5,-0.5,0),D3DXVECTOR2(0,1),//頂点1,
+		D3DXVECTOR3(-0.5,0.5,0), D3DXVECTOR2(0,0),//頂点2
+		D3DXVECTOR3( 0.5,-0.5,0),D3DXVECTOR2(1,1), //頂点3
+		D3DXVECTOR3(  0.5,0.5,0),D3DXVECTOR2(1,0), //頂点4
+	};
+	D3D11_BUFFER_DESC bd;
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.ByteWidth = sizeof(SimpleVertex)*4;
+	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	bd.CPUAccessFlags = 0;
+	bd.MiscFlags = 0;
+
+	D3D11_SUBRESOURCE_DATA InitData;
+	InitData.pSysMem = vertices;
+	if( FAILED( m_pDevice->CreateBuffer( &bd, &InitData, &m_pVertexBuffer ) ) )
+	{
+		return E_FAIL;
+	}
+	//バーテックスバッファーをセット
+	UINT stride = sizeof( SimpleVertex );
+	UINT offset = 0;
+	m_pDeviceContext->IASetVertexBuffers( 0, 1, &m_pVertexBuffer, &stride, &offset );
+	//テクスチャー用サンプラー作成
+	D3D11_SAMPLER_DESC SamDesc;
+	ZeroMemory(&SamDesc,sizeof(D3D11_SAMPLER_DESC));
+	SamDesc.Filter = D3D11_FILTER_MIN_POINT_MAG_MIP_LINEAR;
+	SamDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	SamDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	SamDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+	m_pDevice->CreateSamplerState( &SamDesc, &m_pSampleLinear);
+	//テクスチャー作成
+	//if(FAILED(D3DX11CreateShaderResourceViewFromFile( m_pDevice, L"Resource/yutapon.png", NULL, NULL, &m_pTexture, NULL )))
+	//{
+	//	return E_FAIL;
+	//}
+
+	Comfort::TGAImage tga;
+	tga.ReadTGA("Resource/Building_Texture.tga");
+//	ID3D11ShaderResourceView* res;
+	tga.CreateTextureResource2D(m_pDevice, m_pTexture);
+	return S_OK;
+}
+//
+//
+//シーンを画面にレンダリング
+void MAIN::Render()
+{
+	//画面クリア（実際は単色で画面を塗りつぶす処理）
+	float ClearColor[4] = {0,0,1,1};// クリア色作成　RGBAの順
+	m_pDeviceContext->ClearRenderTargetView(m_pBackBuffer_TexRTV,ClearColor);//画面クリア
+	m_pDeviceContext->ClearDepthStencilView(m_pBackBuffer_DSTexDSV,D3D11_CLEAR_DEPTH,1.0f,0);//深度バッファクリア
+
+	D3DXMATRIX mWorld;
+	D3DXMATRIX mView;
+	D3DXMATRIX mProj;
+	//ワールドトランスフォーム（絶対座標変換）
+	D3DXMatrixRotationY( &mWorld, 0 );//単純にyaw回転させる
+	// ビュートランスフォーム（視点座標変換）
+	D3DXVECTOR3 vEyePt( 0.0f, 1.0f,-2.0f ); //カメラ（視点）位置
+	D3DXVECTOR3 vLookatPt( 0.0f, 0.0f, 0.0f );//注視位置
+	D3DXVECTOR3 vUpVec( 0.0f, 1.0f, 0.0f );//上方位置
+	D3DXMatrixLookAtLH( &mView, &vEyePt, &vLookatPt, &vUpVec );
+	// プロジェクショントランスフォーム（射影変換）
+	D3DXMatrixPerspectiveFovLH( &mProj, D3DX_PI/4, (FLOAT)WINDOW_WIDTH/(FLOAT)WINDOW_HEIGHT, 0.1f, 100.0f );	
+
+	//使用するシェーダーの登録	
+	m_pDeviceContext->VSSetShader(m_pVertexShader,NULL,0);
+	m_pDeviceContext->PSSetShader(m_pPixelShader,NULL,0);
+	//シェーダーのコンスタントバッファーに各種データを渡す	
+	D3D11_MAPPED_SUBRESOURCE pData;
+	SIMPLESHADER_CONSTANT_BUFFER cb;
+	if( SUCCEEDED( m_pDeviceContext->Map( m_pConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &pData ) ) )
+	{
+		//ワールド、カメラ、射影行列を渡す
+		D3DXMATRIX m=mWorld*mView*mProj;
+		D3DXMatrixTranspose( &m, &m );
+		cb.mWVP=m;
+		//カラーを渡す
+		D3DXVECTOR4 vColor(1,0,0,1);
+		cb.vColor=vColor;
+		memcpy_s( pData.pData, pData.RowPitch, (void*)( &cb), sizeof( cb ) );
+		m_pDeviceContext->Unmap( m_pConstantBuffer, 0 );
+	}
+	//このコンスタントバッファーを使うシェーダーの登録
+	m_pDeviceContext->VSSetConstantBuffers(0,1,&m_pConstantBuffer );
+	m_pDeviceContext->PSSetConstantBuffers(0,1,&m_pConstantBuffer );	
+	//頂点インプットレイアウトをセット
+	m_pDeviceContext->IASetInputLayout( m_pVertexLayout );
+	//プリミティブ・トポロジーをセット
+	m_pDeviceContext->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP );
+	//テクスチャーをシェーダーに渡す
+	m_pDeviceContext->PSSetSamplers(0,1,&m_pSampleLinear);
+	m_pDeviceContext->PSSetShaderResources(0,1,&m_pTexture);
+	//プリミティブをレンダリング
+	m_pDeviceContext->Draw(4,0);
+
+	m_pSwapChain->Present(0,0);//画面更新（バックバッファをフロントバッファに）	
 }
